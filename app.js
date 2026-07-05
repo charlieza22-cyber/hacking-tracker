@@ -1,5 +1,5 @@
 // Inicializar Supabase (config viene de supabase-config.js)
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let currentUser = null;
 let state = {}; // progreso: { "f1-0": true, "f1-1": false, ... }
@@ -24,7 +24,7 @@ sendLinkBtn.addEventListener("click", async () => {
   }
   sendLinkBtn.disabled = true;
   sendLinkBtn.textContent = "Enviando...";
-  const { error } = await supabase.auth.signInWithOtp({
+  const { error } = await supabaseClient.auth.signInWithOtp({
     email,
     options: { emailRedirectTo: window.location.href }
   });
@@ -40,10 +40,10 @@ sendLinkBtn.addEventListener("click", async () => {
 });
 
 logoutBtn.addEventListener("click", async () => {
-  await supabase.auth.signOut();
+  await supabaseClient.auth.signOut();
 });
 
-supabase.auth.onAuthStateChange(async (event, session) => {
+supabaseClient.auth.onAuthStateChange(async (event, session) => {
   if (session && session.user) {
     currentUser = session.user;
     loginScreen.classList.add("hidden");
@@ -59,7 +59,7 @@ supabase.auth.onAuthStateChange(async (event, session) => {
 async function loadProgress() {
   syncStatus.textContent = "Cargando...";
   try {
-    const { data, error } = await supabase
+    const { data, error } = await supabaseClient
       .from("progress")
       .select("checklist")
       .eq("user_id", currentUser.id)
@@ -78,7 +78,7 @@ async function loadProgress() {
 async function saveProgress() {
   syncStatus.textContent = "Guardando...";
   try {
-    const { error } = await supabase
+    const { error } = await supabaseClient
       .from("progress")
       .upsert({ user_id: currentUser.id, checklist: state, updated_at: new Date().toISOString() });
     if (error) throw error;
