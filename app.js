@@ -1,33 +1,51 @@
-// Inicializar Firebase (config viene de firebase-config.js)
-firebase.initializeApp(firebaseConfig);
-const auth = firebase.auth();
-const db = firebase.firestore();
+// Inicializar Supabase (config viene de supabase-config.js)
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let currentUser = null;
 let state = {}; // progreso: { "f1-0": true, "f1-1": false, ... }
 
 const loginScreen = document.getElementById("login-screen");
 const appScreen = document.getElementById("app-screen");
-const loginBtn = document.getElementById("google-login-btn");
+const loginForm = document.getElementById("login-form");
+const linkSentMsg = document.getElementById("link-sent-msg");
+const emailInput = document.getElementById("email-input");
+const sendLinkBtn = document.getElementById("send-link-btn");
 const logoutBtn = document.getElementById("logout-btn");
 const resetBtn = document.getElementById("reset-btn");
 const loginError = document.getElementById("login-error");
 const syncStatus = document.getElementById("sync-status");
 
-loginBtn.addEventListener("click", () => {
-  const provider = new firebase.auth.GoogleAuthProvider();
+sendLinkBtn.addEventListener("click", async () => {
+  const email = emailInput.value.trim();
   loginError.textContent = "";
-  auth.signInWithPopup(provider).catch(err => {
-    loginError.textContent = "No se pudo iniciar sesión. Intentá de nuevo.";
-    console.error(err);
+  if (!email || !email.includes("@")) {
+    loginError.textContent = "Escribí un correo válido.";
+    return;
+  }
+  sendLinkBtn.disabled = true;
+  sendLinkBtn.textContent = "Enviando...";
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo: window.location.href }
   });
+  sendLinkBtn.disabled = false;
+  sendLinkBtn.textContent = "Enviarme link de acceso";
+  if (error) {
+    loginError.textContent = "No se pudo enviar el link. Intentá de nuevo.";
+    console.error(error);
+    return;
+  }
+  loginForm.classList.add("hidden");
+  linkSentMsg.classList.remove("hidden");
 });
 
-logoutBtn.addEventListener("click", () => auth.signOut());
+logoutBtn.addEventListener("click", async () => {
+  await supabase.auth.signOut();
+});
 
-auth.onAuthStateChanged(async (user) => {
-  if (user) {
-    currentUser = user;
+supabase.auth.onAuthStateChange(async (event, session) => {
+  if (session && session.user) {
+    currentUser = session.user;
     loginScreen.classList.add("hidden");
     appScreen.classList.remove("hidden");
     await loadProgress();
@@ -41,8 +59,13 @@ auth.onAuthStateChanged(async (user) => {
 async function loadProgress() {
   syncStatus.textContent = "Cargando...";
   try {
-    const doc = await db.collection("progress").doc(currentUser.uid).get();
-    state = doc.exists ? (doc.data().checklist || {}) : {};
+    const { data, error } = await supabase
+      .from("progress")
+      .select("checklist")
+      .eq("user_id", currentUser.id)
+      .maybeSingle();
+    if (error) throw error;
+    state = (data && data.checklist) ? data.checklist : {};
     syncStatus.textContent = "Sincronizado";
   } catch (err) {
     console.error(err);
@@ -55,10 +78,10 @@ async function loadProgress() {
 async function saveProgress() {
   syncStatus.textContent = "Guardando...";
   try {
-    await db.collection("progress").doc(currentUser.uid).set({
-      checklist: state,
-      updatedAt: firebase.firestore.FieldValue.serverTimestamp()
-    });
+    const { error } = await supabase
+      .from("progress")
+      .upsert({ user_id: currentUser.id, checklist: state, updated_at: new Date().toISOString() });
+    if (error) throw error;
     syncStatus.textContent = "Sincronizado";
   } catch (err) {
     console.error(err);
