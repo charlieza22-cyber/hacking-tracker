@@ -1,61 +1,165 @@
-<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Ruta Hacking Ético — Charlie</title>
-<link rel="stylesheet" href="style.css" />
-</head>
-<body>
+// Inicializar Supabase (config viene de supabase-config.js)
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-  <!-- Pantalla de login -->
-  <div id="login-screen" class="screen">
-    <div class="login-box">
-      <p class="eyebrow">ruta_hacking_etico.log</p>
-      <h1>Panel de progreso</h1>
-      <p class="subtitle">Tu plan de estudio de ciberseguridad y hacking ético, guardado en la nube.</p>
-      <button id="google-login-btn" class="btn-primary">
-        <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true"><path fill="#FFC107" d="M43.6 20.5H42V20.4H24v7.2h11.3c-1.6 4.6-6 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.4-5.4C34.5 5.9 29.5 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6 4.4C13.9 15.2 18.6 12 24 12c3.1 0 5.9 1.2 8 3.1l5.4-5.4C34.5 5.9 29.5 4 24 4 16.3 4 9.7 8.3 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.4 0 10.3-1.9 14-5.6l-6.4-5.4c-2 1.4-4.6 2.3-7.6 2.3-5.3 0-9.7-3.4-11.3-8.1l-6.2 4.7C9.5 39.6 16.2 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20.4H24v7.2h11.3c-.8 2.3-2.2 4.2-4.1 5.6l6.4 5.4C41.5 35.5 44 30.2 44 24c0-1.3-.1-2.7-.4-3.5z"/></svg>
-        Entrar con Google
-      </button>
-      <p id="login-error" class="error-text"></p>
-    </div>
-  </div>
+let currentUser = null;
+let state = {}; // progreso: { "f1-0": true, "f1-1": false, ... }
 
-  <!-- App principal -->
-  <div id="app-screen" class="screen hidden">
-    <header class="topbar">
+const loginScreen = document.getElementById("login-screen");
+const appScreen = document.getElementById("app-screen");
+const loginForm = document.getElementById("login-form");
+const linkSentMsg = document.getElementById("link-sent-msg");
+const emailInput = document.getElementById("email-input");
+const sendLinkBtn = document.getElementById("send-link-btn");
+const logoutBtn = document.getElementById("logout-btn");
+const resetBtn = document.getElementById("reset-btn");
+const loginError = document.getElementById("login-error");
+const syncStatus = document.getElementById("sync-status");
+
+sendLinkBtn.addEventListener("click", async () => {
+  const email = emailInput.value.trim();
+  loginError.textContent = "";
+  if (!email || !email.includes("@")) {
+    loginError.textContent = "Escribí un correo válido.";
+    return;
+  }
+  sendLinkBtn.disabled = true;
+  sendLinkBtn.textContent = "Enviando...";
+  const { error } = await supabase.auth.signInWithOtp({
+    email,
+    options: { emailRedirectTo: window.location.href }
+  });
+  sendLinkBtn.disabled = false;
+  sendLinkBtn.textContent = "Enviarme link de acceso";
+  if (error) {
+    loginError.textContent = "No se pudo enviar el link. Intentá de nuevo.";
+    console.error(error);
+    return;
+  }
+  loginForm.classList.add("hidden");
+  linkSentMsg.classList.remove("hidden");
+});
+
+logoutBtn.addEventListener("click", async () => {
+  await supabase.auth.signOut();
+});
+
+supabase.auth.onAuthStateChange(async (event, session) => {
+  if (session && session.user) {
+    currentUser = session.user;
+    loginScreen.classList.add("hidden");
+    appScreen.classList.remove("hidden");
+    await loadProgress();
+  } else {
+    currentUser = null;
+    appScreen.classList.add("hidden");
+    loginScreen.classList.remove("hidden");
+  }
+});
+
+async function loadProgress() {
+  syncStatus.textContent = "Cargando...";
+  try {
+    const { data, error } = await supabase
+      .from("progress")
+      .select("checklist")
+      .eq("user_id", currentUser.id)
+      .maybeSingle();
+    if (error) throw error;
+    state = (data && data.checklist) ? data.checklist : {};
+    syncStatus.textContent = "Sincronizado";
+  } catch (err) {
+    console.error(err);
+    syncStatus.textContent = "Error al cargar. Revisá tu conexión.";
+    state = {};
+  }
+  render();
+}
+
+async function saveProgress() {
+  syncStatus.textContent = "Guardando...";
+  try {
+    const { error } = await supabase
+      .from("progress")
+      .upsert({ user_id: currentUser.id, checklist: state, updated_at: new Date().toISOString() });
+    if (error) throw error;
+    syncStatus.textContent = "Sincronizado";
+  } catch (err) {
+    console.error(err);
+    syncStatus.textContent = "No se pudo guardar. Revisá tu conexión.";
+  }
+}
+
+function computeStats() {
+  let total = 0, done = 0;
+  const phaseStats = STUDY_PLAN.map(p => {
+    const d = p.items.filter((_, i) => state[p.id + "-" + i]).length;
+    total += p.items.length;
+    done += d;
+    return { id: p.id, done: d, total: p.items.length };
+  });
+  return { total, done, phaseStats };
+}
+
+function render() {
+  const { total, done, phaseStats } = computeStats();
+  const pct = total ? Math.round((done / total) * 100) : 0;
+  document.getElementById("pct").textContent = pct + "%";
+  document.getElementById("bar").style.width = pct + "%";
+
+  const container = document.getElementById("phases");
+  container.innerHTML = "";
+
+  STUDY_PLAN.forEach((phase, pIdx) => {
+    const stat = phaseStats[pIdx];
+    const phasePct = stat.total ? Math.round((stat.done / stat.total) * 100) : 0;
+
+    const card = document.createElement("div");
+    card.className = "phase-card";
+
+    const header = document.createElement("div");
+    header.className = "phase-header";
+    header.innerHTML = `
       <div>
-        <p class="eyebrow">ruta_hacking_etico.log</p>
-        <h1>Panel de progreso</h1>
+        <div class="phase-title">${phase.title}</div>
+        <div class="phase-range">${phase.range}</div>
       </div>
-      <div class="topbar-right">
-        <div class="pct-display">
-          <div id="pct" class="pct-number">0%</div>
-          <div class="pct-label">completado</div>
-        </div>
-        <button id="logout-btn" class="btn-ghost">Salir</button>
-      </div>
-    </header>
+      <div class="phase-badge">${stat.done}/${stat.total}</div>
+    `;
+    card.appendChild(header);
 
-    <div class="progress-track">
-      <div id="bar" class="progress-fill"></div>
-    </div>
+    const miniBar = document.createElement("div");
+    miniBar.className = "mini-bar";
+    miniBar.innerHTML = `<div class="mini-fill" style="width:${phasePct}%"></div>`;
+    card.appendChild(miniBar);
 
-    <div id="sync-status" class="sync-status">Sincronizado</div>
+    phase.items.forEach((item, iIdx) => {
+      const key = phase.id + "-" + iIdx;
+      const checked = !!state[key];
+      const row = document.createElement("label");
+      row.className = "item-row";
+      row.innerHTML = `
+        <input type="checkbox" data-key="${key}" ${checked ? "checked" : ""} />
+        <span class="${checked ? "item-done" : ""}">${item}</span>
+      `;
+      card.appendChild(row);
+    });
 
-    <div id="phases"></div>
+    container.appendChild(card);
+  });
 
-    <div class="footer-actions">
-      <button id="reset-btn" class="btn-ghost">Reiniciar progreso</button>
-    </div>
-  </div>
+  container.querySelectorAll("input[type=checkbox]").forEach(cb => {
+    cb.addEventListener("change", async (e) => {
+      const key = e.target.getAttribute("data-key");
+      state[key] = e.target.checked;
+      render();
+      await saveProgress();
+    });
+  });
+}
 
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
-<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
-<script src="firebase-config.js"></script>
-<script src="data.js"></script>
-<script src="app.js"></script>
-</body>
-</html>
+resetBtn.addEventListener("click", async () => {
+  if (!confirm("¿Reiniciar todo tu progreso? Esta acción no se puede deshacer.")) return;
+  state = {};
+  render();
+  await saveProgress();
+});
