@@ -92,3 +92,5 @@ Igual que hiciste con tu app del Mundial:
 - **Editar el plan de estudio:** todo el contenido (fases y tareas) está en `data.js`.
 - **Independencia total:** esta app no depende de Claude ni de esta conversación. Vive en tu GitHub y tu Supabase, para siempre.
 - **El proyecto de Firebase que ya creaste** (`hacking-etico-tracker`) lo podés borrar tranquilamente desde la consola de Firebase — no lo vamos a usar.
+
+  
